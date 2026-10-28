@@ -1,6 +1,4 @@
-
 const API = "https://api.tenrai.org/v1";
-// TROQUE pelo seu número de matrícula antes de entregar o trabalho.
 const MATRICULA = "469906";
 const LOGS_API = "https://www.piway.com.br/unoesc/api";
 
@@ -88,8 +86,23 @@ async function apiRequest(path, signal) {
   return json;
 }
 
-// Registra a operação na API de logs do professor sem interromper o site
-// caso a API de logs esteja temporariamente indisponível.
+// Remove caracteres que quebram a URL da API de logs (/ \ ? # % &)
+function limparLog(texto) {
+  return String(texto)
+    .replace(/[\/\\?#%&]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 150);
+}
+
+// Evita várias consultas de logs ao mesmo tempo
+let logsTimer;
+function agendarCarregarLogs() {
+  clearTimeout(logsTimer);
+  logsTimer = setTimeout(carregarLogs, 300);
+}
+
+
 async function registrarLog(path, resposta) {
   if (!MATRICULA || MATRICULA === "SUA_MATRICULA") {
     console.warn("Informe sua matrícula na constante MATRICULA para registrar logs.");
@@ -97,22 +110,24 @@ async function registrarLog(path, resposta) {
   }
 
   const apiNome = "Tenrai API";
-  const metodo = path;
-  const dados = Array.isArray(resposta.data)
-    ? `${resposta.data.length} resultado(s) retornado(s)`
-    : resposta.data?.title
-      ? `Anime: ${resposta.data.title}`
-      : `Requisição concluída com sucesso (${Object.keys(resposta).join(", ")})`;
+  const metodo = limparLog(path.split("?")[0]) || "requisicao";
+  const dados = limparLog(
+    Array.isArray(resposta.data)
+      ? `${resposta.data.length} resultado(s) retornado(s)`
+      : resposta.data?.title
+        ? `Anime: ${resposta.data.title}`
+        : `Requisicao concluida com sucesso (${Object.keys(resposta).join(", ")})`
+  );
 
   const url = `${LOGS_API}/inserir/log/${encodeURIComponent(MATRICULA)}/${encodeURIComponent(apiNome)}/${encodeURIComponent(metodo)}/${encodeURIComponent(dados)}`;
 
   try {
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    await response.text();
-    carregarLogs();
+    const texto = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${texto.slice(0, 100)}`);
+    agendarCarregarLogs();
   } catch (error) {
-    console.error("Não foi possível registrar o log:", error);
+    console.error("Não foi possível registrar o log:", error, url);
   }
 }
 
@@ -127,8 +142,15 @@ async function carregarLogs() {
   logsMessage.textContent = "Carregando logs...";
   try {
     const response = await fetch(`${LOGS_API}/logs/${encodeURIComponent(MATRICULA)}`);
-    const dados = await response.json();
-    if (!response.ok) throw new Error("Falha ao consultar a API de logs.");
+    const texto = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${texto.slice(0, 100)}`);
+
+    let dados;
+    try {
+      dados = JSON.parse(texto);
+    } catch {
+      throw new Error(`Resposta inesperada: ${texto.slice(0, 100)}`);
+    }
     if (!Array.isArray(dados)) {
       throw new Error(typeof dados === "string" ? dados : "A API não retornou uma lista de logs.");
     }
@@ -378,8 +400,6 @@ function renderAnime(animes) {
 function setPage(page) {
   currentPage = page;
   loadAnime();
-carregarLogs();
-document.querySelector("#refresh-logs")?.addEventListener("click", carregarLogs);
 
   document.querySelector("#catalogo").scrollIntoView({
     behavior: "smooth",
@@ -392,22 +412,16 @@ searchForm.addEventListener("submit", event => {
   searchMode = searchInput.value.trim() ? "search" : "popular";
   currentPage = 1;
   loadAnime();
-carregarLogs();
-document.querySelector("#refresh-logs")?.addEventListener("click", carregarLogs);
 });
 
 genreFilter.addEventListener("change", () => {
   currentPage = 1;
   loadAnime();
-carregarLogs();
-document.querySelector("#refresh-logs")?.addEventListener("click", carregarLogs);
 });
 
 sortFilter.addEventListener("change", () => {
   currentPage = 1;
   loadAnime();
-carregarLogs();
-document.querySelector("#refresh-logs")?.addEventListener("click", carregarLogs);
 });
 
 document.querySelector("#popular-btn").addEventListener("click", () => {
@@ -417,8 +431,6 @@ document.querySelector("#popular-btn").addEventListener("click", () => {
   searchMode = "popular";
   currentPage = 1;
   loadAnime();
-carregarLogs();
-document.querySelector("#refresh-logs")?.addEventListener("click", carregarLogs);
 });
 
 document.querySelector("#clear-btn").addEventListener("click", () => {
@@ -428,8 +440,6 @@ document.querySelector("#clear-btn").addEventListener("click", () => {
   searchMode = "popular";
   currentPage = 1;
   loadAnime();
-carregarLogs();
-document.querySelector("#refresh-logs")?.addEventListener("click", carregarLogs);
 });
 
 document.querySelector("#prev-btn").addEventListener("click", () => {
